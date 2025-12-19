@@ -1,0 +1,9 @@
+services:
+  web:
+    build: .
+    command: python app.py
+    volumes:
+      - .:/app
+    ports:
+      - "15000:5000"
+    working_dir: /app
