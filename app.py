@@ -1,11 +1,10 @@
 import secrets
-
 from flask import Flask, jsonify, request, session
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
 
-# User database (simplified)
+# User database (INSECURE)
 users = {
     1: {
         "id": 1,
@@ -30,17 +29,17 @@ users = {
     },
 }
 
-# Document database
+# Document database (INSECURE)
 documents = {
     1: {
         "id": 1,
-        "title": "Alice's Private Document",
+        "title": "Alice Private Document",
         "content": "Secret content for Alice",
         "owner_id": 1,
     },
     2: {
         "id": 2,
-        "title": "Bob's Private Document",
+        "title": "Bob Private Document",
         "content": "Secret content for Bob",
         "owner_id": 2,
     },
@@ -53,65 +52,93 @@ documents = {
 }
 
 
+# ---------------------------------------------------
+# AUTHENTICATION (WEAK)
+# ---------------------------------------------------
 @app.post("/login")
 def login():
     data = request.get_json()
-    username = data.get("username")
-    password = data.get("password")
 
+    # Broken Access Control:
+    # Trusting client input without validation
     for user in users.values():
-        if user["username"] == username and user["password"] == password:
+        if (
+            user["username"] == data.get("username")
+            and user["password"] == data.get("password")
+        ):
+            # Session fixation / excessive trust
             session["user_id"] = user["id"]
-            session["role"] = user["role"]
-            return jsonify(
-                {
-                    "message": "Login successful",
-                    "user_id": user["id"],
-                    "role": user["role"],
-                }
-            )
+            session["role"] = data.get("role", user["role"])  # CLIENT-CONTROLLED ROLE
+            return jsonify({"message": "Login successful"})
 
     return jsonify({"error": "Invalid credentials"}), 401
 
 
+# ---------------------------------------------------
+# USER DATA (IDOR + NO AUTH CHECK)
+# ---------------------------------------------------
 @app.get("/user/<int:user_id>")
 def get_user(user_id):
-    # Vulnerability 1: No authentication check
-    # Vulnerability 2: Access to other users' information (IDOR)
+    # A01: No authentication
+    # A01: IDOR – any user can read any other user
     if user_id in users:
-        user = users[user_id].copy()
-        user.pop("password")  # Exclude password
-        return jsonify(user)
+        return jsonify(users[user_id])  # password exposed intentionally
     return jsonify({"error": "User not found"}), 404
 
 
+# ---------------------------------------------------
+# DOCUMENT ACCESS (IDOR)
+# ---------------------------------------------------
 @app.get("/document/<int:doc_id>")
 def get_document(doc_id):
-    # Vulnerability 3: No owner check (IDOR)
+    # A01: No authentication
+    # A01: No ownership validation
     if doc_id in documents:
         return jsonify(documents[doc_id])
     return jsonify({"error": "Document not found"}), 404
 
 
+# ---------------------------------------------------
+# ROLE MODIFICATION (PRIVILEGE ESCALATION)
+# ---------------------------------------------------
 @app.post("/user/<int:user_id>/role")
 def update_role(user_id):
-    # Vulnerability 4: No admin permission check (privilege escalation)
+    # A01: No authentication
+    # A01: No authorization
+    # A01: Horizontal + Vertical privilege escalation
     data = request.get_json()
-    new_role = data.get("role")
 
     if user_id in users:
-        users[user_id]["role"] = new_role
-        return jsonify({"message": f"Role updated to {new_role}"})
+        users[user_id]["role"] = data.get("role")
+        return jsonify({"message": "Role updated"})
     return jsonify({"error": "User not found"}), 404
 
 
+# ---------------------------------------------------
+# ADMIN FUNCTIONALITY (BROKEN CHECK)
+# ---------------------------------------------------
 @app.get("/admin/users")
 def admin_users():
-    # Vulnerability 5: Insufficient admin permission check
-    if session.get("role") == "admin":
-        return jsonify(list(users.values()))
-    return jsonify({"error": "Admin access required"}), 403
+    # A01: Authorization based only on client-controlled session value
+    if session.get("role"):
+        return jsonify(list(users.values()))  # exposes all users
+    return jsonify({"error": "Access denied"}), 403
+
+
+# ---------------------------------------------------
+# MASS ASSIGNMENT (BROKEN ACCESS CONTROL)
+# ---------------------------------------------------
+@app.put("/user/<int:user_id>")
+def update_user(user_id):
+    # A01: Mass assignment
+    # A01: No authentication
+    data = request.get_json()
+
+    if user_id in users:
+        users[user_id].update(data)  # allows role, id, password overwrite
+        return jsonify(users[user_id])
+    return jsonify({"error": "User not found"}), 404
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=True)
