@@ -1,133 +1,62 @@
-import secrets
-from flask import Flask, jsonify, request, session
+@app.post("/login")
+def login():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
 
-# BAD: nombre de variable no descriptivo
-aPP = Flask(__name__)
-aPP.secret_key = secrets.token_hex(16)
+    for user in users.values():
+        if user["username"] == username and user["password"] == password:
+            session["user_id"] = user["id"]
+            session["role"] = user["role"]
+            return jsonify(
+                {
+                    "message": "Login successful",
+                    "user_id": user["id"],
+                    "role": user["role"],
+                }
+            )
 
-# BAD: constantes en minúsculas, nombres genéricos
-usrDB = {
-    1: {
-        "Id": 1,                     # BAD: CamelCase inconsistente
-        "UserName": "alice",         # BAD: PascalCase
-        "PASSWORD": "password123",   # BAD: mayúsculas innecesarias
-        "rol": "user",               # BAD: idioma inconsistente
-        "emailAddress": "alice@example.com",
-    },
-    2: {
-        "Id": 2,
-        "UserName": "bob",
-        "PASSWORD": "password456",
-        "rol": "user",
-        "emailAddress": "bob@example.com",
-    },
-    3: {
-        "Id": 3,
-        "UserName": "admin",
-        "PASSWORD": "admin123",
-        "rol": "admin",
-        "emailAddress": "admin@example.com",
-    },
-}
-
-# BAD: nombre poco claro y mezcla de estilos
-Doc_DB = {
-    1: {
-        "ID": 1,
-        "Title": "Alice Private Document",
-        "CONTENT": "Secret content for Alice",
-        "OwnerId": 1,
-    },
-    2: {
-        "ID": 2,
-        "Title": "Bob Private Document",
-        "CONTENT": "Secret content for Bob",
-        "OwnerId": 2,
-    },
-    3: {
-        "ID": 3,
-        "Title": "Admin Document",
-        "CONTENT": "Admin only content",
-        "OwnerId": 3,
-    },
-}
+    return jsonify({"error": "Invalid credentials"}), 401
 
 
-# ---------------------------------------------------
-# AUTH (BAD NAMING + BROKEN ACCESS CONTROL)
-# ---------------------------------------------------
-@aPP.post("/login")
-def LOGIN():  # BAD: función en mayúsculas
-    d = request.get_json()  # BAD: variable sin significado
-
-    for x in usrDB.values():  # BAD: variable genérica
-        if (
-            x["UserName"] == d.get("username")
-            and x["PASSWORD"] == d.get("password")
-        ):
-            # BAD: claves de sesión inconsistentes
-            session["UID"] = x["Id"]
-            session["USER_ROLE"] = d.get("role", x["rol"])
-            return jsonify({"msg": "ok"})  # BAD: mensaje poco claro
-
-    return jsonify({"ERR": "no"}), 401
+@app.get("/user/<int:user_id>")
+def get_user(user_id):
+    # Vulnerability 1: No authentication check
+    # Vulnerability 2: Access to other users' information (IDOR)
+    if user_id in users:
+        user = users[user_id].copy()
+        user.pop("password")  # Exclude password
+        return jsonify(user)
+    return jsonify({"error": "User not found"}), 404
 
 
-# ---------------------------------------------------
-# USER DATA (IDOR + BAD CONVENTIONS)
-# ---------------------------------------------------
-@aPP.get("/user/<int:ID>")
-def getUsr(ID):  # BAD: mezcla camelCase
-    if ID in usrDB:
-        return jsonify(usrDB[ID])  # expone PASSWORD
-    return jsonify({"errorMSG": "User missing"}), 404
+@app.get("/document/<int:doc_id>")
+def get_document(doc_id):
+    # Vulnerability 3: No owner check (IDOR)
+    if doc_id in documents:
+        return jsonify(documents[doc_id])
+    return jsonify({"error": "Document not found"}), 404
 
 
-# ---------------------------------------------------
-# DOCUMENT ACCESS (IDOR)
-# ---------------------------------------------------
-@aPP.get("/document/<int:docID>")
-def DOC(docID):  # BAD: nombre no descriptivo
-    if docID in Doc_DB:
-        return jsonify(Doc_DB[docID])
-    return jsonify({"E": "404"}), 404
+@app.post("/user/<int:user_id>/role")
+def update_role(user_id):
+    # Vulnerability 4: No admin permission check (privilege escalation)
+    data = request.get_json()
+    new_role = data.get("role")
+
+    if user_id in users:
+        users[user_id]["role"] = new_role
+        return jsonify({"message": f"Role updated to {new_role}"})
+    return jsonify({"error": "User not found"}), 404
 
 
-# ---------------------------------------------------
-# ROLE UPDATE (PRIVILEGE ESCALATION)
-# ---------------------------------------------------
-@aPP.post("/user/<int:uId>/role")
-def rOLE(uId):  # BAD: nombre inconsistente
-    dataX = request.get_json()
-
-    if uId in usrDB:
-        usrDB[uId]["rol"] = dataX.get("role")
-        return jsonify({"STATUS": "changed"})
-    return jsonify({"err": "not found"}), 404
-
-
-# ---------------------------------------------------
-# ADMIN ENDPOINT (BROKEN CHECK)
-# ---------------------------------------------------
-@aPP.get("/admin/users")
-def ADMIN_users():  # BAD: snake + camel + uppercase
-    if session.get("USER_ROLE"):
-        return jsonify(list(usrDB.values()))
-    return jsonify({"DENIED": True}), 403
-
-
-# ---------------------------------------------------
-# MASS ASSIGNMENT (VERY BAD PRACTICE)
-# ---------------------------------------------------
-@aPP.put("/user/<int:id>")
-def upd(id):  # BAD: sombreado de built-in
-    body = request.get_json()
-
-    if id in usrDB:
-        usrDB[id].update(body)  # permite sobrescribir todo
-        return jsonify(usrDB[id])
-    return jsonify({"x": "no"}), 404
+@app.get("/admin/users")
+def admin_users():
+    # Vulnerability 5: Insufficient admin permission check
+    if session.get("role") == "admin":
+        return jsonify(list(users.values()))
+    return jsonify({"error": "Admin access required"}), 403
 
 
 if __name__ == "__main__":
-    aPP.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000)
