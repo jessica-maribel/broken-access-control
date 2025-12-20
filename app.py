@@ -1,3 +1,58 @@
+import secrets
+
+from flask import Flask, jsonify, request, session
+
+app = Flask(__name__)
+app.secret_key = secrets.token_hex(16)
+
+# User database (simplified)
+users = {
+    1: {
+        "id": 1,
+        "username": "alice",
+        "password": "password123",
+        "role": "user",
+        "email": "alice@example.com",
+    },
+    2: {
+        "id": 2,
+        "username": "bob",
+        "password": "password456",
+        "role": "user",
+        "email": "bob@example.com",
+    },
+    3: {
+        "id": 3,
+        "username": "admin",
+        "password": "admin123",
+        "role": "admin",
+        "email": "admin@example.com",
+    },
+}
+
+# Document database
+documents = {
+    1: {
+        "id": 1,
+        "title": "Alice's Private Document",
+        "content": "Secret content for Alice",
+        "owner_id": 1,
+    },
+    2: {
+        "id": 2,
+        "title": "Bob's Private Document",
+        "content": "Secret content for Bob",
+        "owner_id": 2,
+    },
+    3: {
+        "id": 3,
+        "title": "Admin Document",
+        "content": "Admin only content",
+        "owner_id": 3,
+    },
+}
+
+
 @app.post("/login")
 def login():
     data = request.get_json()
